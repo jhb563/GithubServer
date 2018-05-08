@@ -5,7 +5,9 @@ WORKDIR /app
 ADD . /app
 
 RUN stack setup
-RUN stack build --copy-bins
+RUN stack build
+RUN stack test
+RUN stack install
 
 EXPOSE 80
 
