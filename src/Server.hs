@@ -8,6 +8,7 @@ module Server
   ) where
 
 import Control.Monad.IO.Class (liftIO)
+import Data.Aeson
 import Data.Proxy (Proxy(..))
 import Network.Wai.Handler.Warp (run)
 import System.Environment (getEnv)
@@ -16,14 +17,20 @@ import Servant.Server
 
 type MyAPI = 
   "api" :> "ping" :> Get '[JSON] String
-  :<|> "api" :> "hook" :> ReqBody '[JSON] () :> Post '[JSON] ()
+  :<|> "api" :> "hook" :> ReqBody '[JSON] GithubRequestPayload :> Post '[JSON] ()
+
+data GithubRequestPayload = OtherRequest
+
+instance FromJSON GithubRequestPayload where
+  parseJSON = withObject "GithubRequestPlayoad" $ \o -> do
+    return OtherRequest
 
 pingHandler :: Handler String
 pingHandler = do
   liftIO $ print "Received a ping!"
   return "Hello World!!!!??"
 
-hookHandler :: () -> Handler ()
+hookHandler :: GithubRequestPayload -> Handler ()
 hookHandler _ = do
   liftIO $ print "Received a hook!"
   return ()
