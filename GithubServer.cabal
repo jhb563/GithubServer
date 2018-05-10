@@ -33,6 +33,7 @@ library
     , aeson
     , servant
     , servant-server
+    , text
     , warp
   exposed-modules:
       Server

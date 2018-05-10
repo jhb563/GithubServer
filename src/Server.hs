@@ -1,7 +1,8 @@
-{-# LANGUAGE DataKinds         #-}
-{-# LANGUAGE TypeOperators     #-}
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE TypeOperators       #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Server
   ( runServer
@@ -9,7 +10,9 @@ module Server
 
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson
+import Data.Monoid ((<>))
 import Data.Proxy (Proxy(..))
+import Data.Text (Text)
 import Network.Wai.Handler.Warp (run)
 import System.Environment (getEnv)
 import Servant.API
@@ -17,23 +20,35 @@ import Servant.Server
 
 type MyAPI = 
   "api" :> "ping" :> Get '[JSON] String
-  :<|> "api" :> "hook" :> ReqBody '[JSON] GithubRequestPayload :> Post '[JSON] ()
+  :<|> "api" :> "hook" :> ReqBody '[JSON] GithubRequestPayload :> Post '[JSON] Text
 
-data GithubRequestPayload = OtherRequest
+data GithubRequestPayload = 
+  GitOpenPullRequest Text Text |
+  GitCommit  Text Text Text |
+  GitOtherRequest
+  deriving (Show)
 
 instance FromJSON GithubRequestPayload where
   parseJSON = withObject "GithubRequestPlayoad" $ \o -> do
-    return OtherRequest
+    (action :: Maybe Text) <- o .:? "action"
+    prSectionMaybe <- o .:? "pull_request"
+    case (action, prSectionMaybe) of
+      (Just "opened", Just prSection :: Maybe Value) -> do
+        (userSection :: Value) <- withObject "PR Section" (\o' -> o' .: "user") prSection
+        userName <- withObject "User Section" (\o' -> o' .: "login") userSection
+        commentsURL <- o .: "review_comment_url"
+        return $ GitOpenPullRequest userName commentsURL
+      _ -> return GitOtherRequest
 
 pingHandler :: Handler String
 pingHandler = do
   liftIO $ print "Received a ping!"
   return "Hello World!!!!??"
 
-hookHandler :: GithubRequestPayload -> Handler ()
-hookHandler _ = do
-  liftIO $ print "Received a hook!"
-  return ()
+hookHandler :: GithubRequestPayload -> Handler Text
+hookHandler GitOtherRequest = return "Found some other request!"
+hookHandler (GitOpenPullRequest userName commentsURL) = return $
+  "User: " <> userName <> " opened a pull request with comments at: " <> commentsURL
 
 myAPI :: Proxy MyAPI
 myAPI = Proxy :: Proxy MyAPI
