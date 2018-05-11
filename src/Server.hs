@@ -65,11 +65,12 @@ pingHandler = do
 hookHandler :: GithubRequest -> Handler Text
 hookHandler GithubOtherRequest = return "Found a non-PR opening request."
 hookHandler (GitOpenPRRequest userName commentsURL) = do
-  liftIO $ addComment userName commentsURL
+  resultString <- liftIO $ addComment userName commentsURL
   return $ "User: " <> userName <> 
-    " opened a pull request with comments at: " <> commentsURL
+    " opened a pull request with comments at: " <> commentsURL <> ". Result was:" <>
+    (pack resultString)
 
-addComment :: Text -> Text -> IO ()
+addComment :: Text -> Text -> IO String
 addComment userName commentsURL = do
   gitUsername <- getEnv "GITHUB_USERNAME"
   gitPassword <- getEnv "GITHUB_PASSWORD"
@@ -77,8 +78,10 @@ addComment userName commentsURL = do
   manager <- newManager tlsManagerSettings
   baseUrl <- parseBaseUrl (unpack commentsURL)
   let clientEnv = ClientEnv manager baseUrl
-  runClientM (sendCommentClient authData (commentBody gitUsername)) clientEnv
-  return ()
+  results <- runClientM (sendCommentClient authData (commentBody gitUsername)) clientEnv
+  case results of
+    Left err -> return $ show err
+    Right _ -> return "Success"
   where
     commentBody adminName = GitPRComment $ "Thanks for posting this @" <> userName <>
       "! I'll take a look soon! - @" <> (pack adminName)
