@@ -34,11 +34,15 @@ instance FromJSON GithubRequestPayload where
     prSectionMaybe <- o .:? "pull_request"
     case (action, prSectionMaybe) of
       (Just "opened", Just prSection :: Maybe Value) -> do
-        (userSection :: Value) <- withObject "PR Section" (\o' -> o' .: "user") prSection
+        (userSection :: Value, commentsURL :: Text) <- withObject "PR Section" (\o' -> o' .: "user") prSection
         userName <- withObject "User Section" (\o' -> o' .: "login") userSection
-        commentsURL <- o .: "review_comments_url"
         return $ GitOpenPullRequest userName commentsURL
       _ -> return GitOtherRequest
+    where
+      fetchUserAndComments o' = do
+        uSection <- o' .: "user"
+        commentsURL <- o' .: "review_comments_url"
+        return (uSection, commentsURL)
 
 pingHandler :: Handler String
 pingHandler = do
