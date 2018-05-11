@@ -10,17 +10,26 @@ module Server
 
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson
+import qualified Data.ByteString.Char8 as BSC
 import Data.Monoid ((<>))
 import Data.Proxy (Proxy(..))
-import Data.Text (Text)
+import Data.Text (Text, unpack, pack)
+import Network.HTTP.Client (newManager)
+import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.Wai.Handler.Warp (run)
 import System.Environment (getEnv)
 import Servant.API
+import Servant.Client
 import Servant.Server
 
 type MyAPI = 
   "api" :> "ping" :> Get '[JSON] String
   :<|> "api" :> "hook" :> ReqBody '[JSON] GithubRequestPayload :> Post '[JSON] Text
+
+type GithubAPI = BasicAuth "GithubUser" () :> ReqBody '[JSON] GitPullRequestComment :> Post '[JSON] ()
+
+sendCommentClient :: BasicAuthData -> GitPullRequestComment -> ClientM ()
+sendCommentClient = client (Proxy :: Proxy GithubAPI)
 
 data GithubRequestPayload = 
   GitOpenPullRequest Text Text |
@@ -41,8 +50,13 @@ instance FromJSON GithubRequestPayload where
     where
       fetchUserAndComments o' = do
         uSection <- o' .: "user"
-        commentsURL <- o' .: "review_comments_url"
+        commentsURL <- o' .: "comments_url"
         return (uSection, commentsURL)
+
+data GitPullRequestComment = GitPullRequestComment Text
+
+instance ToJSON GitPullRequestComment where
+  toJSON (GitPullRequestComment body) = object [ "body" .= body ]
 
 pingHandler :: Handler String
 pingHandler = do
@@ -51,8 +65,24 @@ pingHandler = do
 
 hookHandler :: GithubRequestPayload -> Handler Text
 hookHandler GitOtherRequest = return "Found some other request!"
-hookHandler (GitOpenPullRequest userName commentsURL) = return $
-  "User: " <> userName <> " opened a pull request with comments at: " <> commentsURL
+hookHandler (GitOpenPullRequest userName commentsURL) = do
+  liftIO $ addComment commentsURL
+  return $ 
+    "User: " <> userName <> " opened a pull request with comments at: " <> commentsURL
+
+addComment :: Text -> IO ()
+addComment commentsURL = do
+  gitUsername <- getEnv "GITHUB_USERNAME"
+  gitPassword <- getEnv "GITHUB_PASSWORD"
+  let authData = BasicAuthData (BSC.pack gitUsername) (BSC.pack gitPassword)
+  manager <- newManager tlsManagerSettings
+  baseUrl <- parseBaseUrl (unpack commentsURL)
+  let clientEnv = ClientEnv manager baseUrl
+  runClientM (sendCommentClient authData (commentBody gitUsername)) clientEnv
+  return ()
+  where
+    commentBody uName =
+      GitPullRequestComment ("Thanks for posting this! I'll take a look soon! @" <> (pack uName))
 
 myAPI :: Proxy MyAPI
 myAPI = Proxy :: Proxy MyAPI

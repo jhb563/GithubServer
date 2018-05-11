@@ -31,7 +31,11 @@ library
   build-depends:
       base >=4.7 && <5
     , aeson
+    , bytestring
+    , http-client
+    , http-client-tls
     , servant
+    , servant-client
     , servant-server
     , text
     , warp
