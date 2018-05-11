@@ -24,20 +24,19 @@ import Servant.Server
 
 type MyAPI = 
   "api" :> "ping" :> Get '[JSON] String
-  :<|> "api" :> "hook" :> ReqBody '[JSON] GithubRequestPayload :> Post '[JSON] Text
+  :<|> "api" :> "hook" :> ReqBody '[JSON] GithubRequest :> Post '[JSON] Text
 
-type GithubAPI = BasicAuth "GithubUser" () :> ReqBody '[JSON] GitPullRequestComment :> Post '[JSON] ()
+type GithubAPI = BasicAuth "GithubUser" () :> ReqBody '[JSON] GitPRComment :> Post '[JSON] ()
 
-sendCommentClient :: BasicAuthData -> GitPullRequestComment -> ClientM ()
+sendCommentClient :: BasicAuthData -> GitPRComment -> ClientM ()
 sendCommentClient = client (Proxy :: Proxy GithubAPI)
 
-data GithubRequestPayload = 
-  GitOpenPullRequest Text Text |
-  GitCommit  Text Text Text |
-  GitOtherRequest
+data GithubRequest = 
+  GitOpenPRRequest Text Text |
+  GithubOtherRequest
   deriving (Show)
 
-instance FromJSON GithubRequestPayload where
+instance FromJSON GithubRequest where
   parseJSON = withObject "GithubRequestPlayoad" $ \o -> do
     (action :: Maybe Text) <- o .:? "action"
     prSectionMaybe <- o .:? "pull_request"
@@ -45,33 +44,33 @@ instance FromJSON GithubRequestPayload where
       (Just "opened", Just prSection :: Maybe Value) -> do
         (userSection :: Value, commentsURL :: Text) <- withObject "PR Section" fetchUserAndComments prSection
         userName <- withObject "User Section" (\o' -> o' .: "login") userSection
-        return $ GitOpenPullRequest userName commentsURL
-      _ -> return GitOtherRequest
+        return $ GitOpenPRRequest userName commentsURL
+      _ -> return GithubOtherRequest
     where
       fetchUserAndComments o' = do
         uSection <- o' .: "user"
         commentsURL <- o' .: "comments_url"
         return (uSection, commentsURL)
 
-data GitPullRequestComment = GitPullRequestComment Text
+newtype GitPRComment = GitPRComment Text
 
-instance ToJSON GitPullRequestComment where
-  toJSON (GitPullRequestComment body) = object [ "body" .= body ]
+instance ToJSON GitPRComment where
+  toJSON (GitPRComment body) = object [ "body" .= body ]
 
 pingHandler :: Handler String
 pingHandler = do
   liftIO $ print "Received a ping!"
-  return "Hello World!!!!??"
+  return "Hello World!"
 
-hookHandler :: GithubRequestPayload -> Handler Text
-hookHandler GitOtherRequest = return "Found some other request!"
-hookHandler (GitOpenPullRequest userName commentsURL) = do
-  liftIO $ addComment commentsURL
-  return $ 
-    "User: " <> userName <> " opened a pull request with comments at: " <> commentsURL
+hookHandler :: GithubRequest -> Handler Text
+hookHandler GithubOtherRequest = return "Found a non-PR opening request."
+hookHandler (GitOpenPRRequest userName commentsURL) = do
+  liftIO $ addComment userName commentsURL
+  return $ "User: " <> userName <> 
+    " opened a pull request with comments at: " <> commentsURL
 
-addComment :: Text -> IO ()
-addComment commentsURL = do
+addComment :: Text -> Text -> IO ()
+addComment userName commentsURL = do
   gitUsername <- getEnv "GITHUB_USERNAME"
   gitPassword <- getEnv "GITHUB_PASSWORD"
   let authData = BasicAuthData (BSC.pack gitUsername) (BSC.pack gitPassword)
@@ -81,8 +80,8 @@ addComment commentsURL = do
   runClientM (sendCommentClient authData (commentBody gitUsername)) clientEnv
   return ()
   where
-    commentBody uName =
-      GitPullRequestComment ("Thanks for posting this! I'll take a look soon! @" <> (pack uName))
+    commentBody adminName = GitPRComment $ "Thanks for posting this @" <> userName <>
+      "! I'll take a look soon! - @" <> (pack adminName)
 
 myAPI :: Proxy MyAPI
 myAPI = Proxy :: Proxy MyAPI
